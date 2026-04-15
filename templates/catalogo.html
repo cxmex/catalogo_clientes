@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Catalogo Fundastock</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        body { background: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .img-toggle { cursor:pointer; opacity:0.5; transition:all 0.15s; }
+        .img-toggle:hover { opacity:1; transform:scale(1.15); }
+        .img-strip { display:flex; gap:6px; padding:6px 0 4px 0; overflow-x:auto; align-items:center; }
+        .img-strip img {
+            width:64px; height:64px; object-fit:cover; border-radius:6px; flex-shrink:0;
+            cursor:pointer; transition:transform 0.15s; border:2px solid #e9ecef;
+        }
+        .img-strip img:hover { transform:scale(1.08); border-color:#0d6efd; }
+        .img-strip .img-loading { width:64px; height:64px; display:flex; align-items:center; justify-content:center; }
+        .color-img-strip { display:flex; gap:5px; padding:4px 0; overflow-x:auto; }
+        .color-img-strip img {
+            width:52px; height:52px; object-fit:cover; border-radius:5px; flex-shrink:0;
+            cursor:pointer; transition:transform 0.15s; border:1px solid #ddd;
+        }
+        .color-img-strip img:hover { transform:scale(1.1); border-color:#0d6efd; }
+        .barcode-list { font-size:0.65rem; color:#888; font-family:monospace; margin-top:2px; }
+        #lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:9999;
+                    justify-content:center; align-items:center; cursor:pointer; }
+        #lightbox img { max-width:92vw; max-height:92vh; border-radius:8px; object-fit:contain; }
+        #lightbox .close-btn { position:absolute; top:12px; right:18px; background:none; border:none;
+                               color:#fff; font-size:2.2rem; cursor:pointer; }
+        .view-btn.active { background:#212529!important; color:#fff!important; }
+        .img-cell { max-width:280px; }
+    </style>
+</head>
+<body>
+<div class="container-fluid py-3 px-2 px-md-4" style="max-width:960px; margin:auto;">
+
+    <div class="text-center mb-3">
+        <h4 class="mb-1 fw-bold">Catalogo Fundastock</h4>
+        <p class="text-muted small mb-2">Disponibilidad de fundas por estilo y modelo</p>
+        <div class="btn-group btn-group-sm" id="viewToggle">
+            <button class="btn btn-outline-dark view-btn active" data-view="estilo">Por Estilo</button>
+            <button class="btn btn-outline-dark view-btn" data-view="modelo">Por Modelo</button>
+        </div>
+    </div>
+
+    <!-- ============ VIEW 1: ESTILO > MODELO > COLOR ============ -->
+    {% if stock_by_estilo and stock_by_estilo|length > 0 %}
+    <div id="estiloView">
+        <div class="input-group input-group-sm mb-2 mx-auto" style="max-width:360px;">
+            <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="estiloSearch" placeholder="Buscar estilo...">
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0 bg-white" id="estiloTable">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:30px;"></th>
+                        <th>Estilo</th>
+                        <th class="text-end" style="width:50px;">T1</th>
+                        <th class="text-end" style="width:50px;">T2</th>
+                        <th class="text-end" style="width:55px;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in stock_by_estilo %}
+                    {% set est = row.estilo or row.get("estilo","") %}
+                    {% set t1 = row.terex1_stock if row.terex1_stock is defined else row.get("terex1_stock", 0) %}
+                    {% set t2 = row.terex2_stock if row.terex2_stock is defined else row.get("terex2_stock", 0) %}
+                    {% set tot = row.total_stock if row.total_stock is defined else row.get("total_stock", 0) %}
+                    {% set safe_est = est|replace(' ', '_')|replace("'", "_") %}
+                    <tr class="estilo-row" data-estilo="{{ est }}" data-estilo-id="{{ estilo_ids.get(est, '') }}" style="cursor:pointer;" onclick="toggleDetail('{{ est|replace("'", "\\'") }}')">
+                        <td class="text-center"><i class="bi bi-chevron-right"></i></td>
+                        <td class="fw-bold small">{{ est }}</td>
+                        <td class="text-end small">{{ t1 }}</td>
+                        <td class="text-end small">{{ t2 }}</td>
+                        <td class="text-end fw-bold small">{{ tot }}</td>
+                    </tr>
+                    <!-- Estilo images row (hidden, loaded on demand) -->
+                    <tr class="estilo-img-row detail-{{ safe_est }}" data-estilo-id="{{ estilo_ids.get(est, '') }}" style="display:none; background:#fff;">
+                        <td></td>
+                        <td colspan="4" class="img-cell">
+                            <div class="img-strip" id="eimg-{{ estilo_ids.get(est, '') }}">
+                                <div class="img-loading"><div class="spinner-border spinner-border-sm text-secondary"></div></div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% if stock_detail.get(est) %}
+                    {% for m in stock_detail[est] %}
+                    {% set safe_mod = m.modelo|replace(' ', '_')|replace("'", "_") %}
+                    {% set mod_key = safe_est ~ '__' ~ safe_mod %}
+                    <tr class="detail-row detail-{{ safe_est }}" style="display:none; background:#f8f9fa; cursor:pointer;" onclick="toggleColor('{{ mod_key }}')">
+                        <td class="text-center"><i class="bi bi-chevron-right color-icon-{{ mod_key }}"></i></td>
+                        <td class="ps-4 text-muted"><small>{{ m.modelo }}</small></td>
+                        <td class="text-end"><small>{{ m.t1 }}</small></td>
+                        <td class="text-end"><small>{{ m.t2 }}</small></td>
+                        <td class="text-end"><small class="fw-bold">{{ m.total }}</small></td>
+                    </tr>
+                    {% set color_key = est ~ '|' ~ m.modelo %}
+                    {% if color_detail.get(color_key) %}
+                    {% for c in color_detail[color_key] %}
+                    <tr class="color-row color-{{ mod_key }}" style="display:none; background:#eef2ff;">
+                        <td></td>
+                        <td colspan="2" class="ps-5">
+                            <small class="text-secondary"><i class="bi bi-palette"></i> {{ c.color }}</small>
+                            <div class="color-img-strip" data-estilo-id="{{ estilo_ids.get(est, '') }}" data-color-name="{{ c.color }}"></div>
+                            <div class="barcode-list" data-estilo-id="{{ estilo_ids.get(est, '') }}" data-color-name="{{ c.color }}" data-modelo-name="{{ m.modelo }}"></div>
+                        </td>
+                        <td class="text-end"><small class="text-secondary">{{ c.t1 }}</small></td>
+                        <td class="text-end"><small class="text-secondary fw-bold">{{ c.total }}</small></td>
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+                <tfoot class="table-dark">
+                    <tr>
+                        <td></td>
+                        <th class="small">TOTAL</th>
+                        <th class="text-end small">
+                            {% set st1 = namespace(v=0) %}{% for r in stock_by_estilo %}{% set st1.v = st1.v + (r.terex1_stock if r.terex1_stock is defined else r.get("terex1_stock",0)) %}{% endfor %}{{ st1.v }}
+                        </th>
+                        <th class="text-end small">
+                            {% set st2 = namespace(v=0) %}{% for r in stock_by_estilo %}{% set st2.v = st2.v + (r.terex2_stock if r.terex2_stock is defined else r.get("terex2_stock",0)) %}{% endfor %}{{ st2.v }}
+                        </th>
+                        <th class="text-end small">
+                            {% set stt = namespace(v=0) %}{% for r in stock_by_estilo %}{% set stt.v = stt.v + (r.total_stock if r.total_stock is defined else r.get("total_stock",0)) %}{% endfor %}{{ stt.v }}
+                        </th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ============ VIEW 2: MODELO > ESTILO > COLOR ============ -->
+    {% if stock_by_modelo and stock_by_modelo|length > 0 %}
+    <div id="modeloView" style="display:none;">
+        <div class="input-group input-group-sm mb-2 mx-auto" style="max-width:360px;">
+            <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="modeloSearch" placeholder="Buscar modelo...">
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0 bg-white" id="modeloTable">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:30px;"></th>
+                        <th>Modelo</th>
+                        <th class="text-end" style="width:50px;">T1</th>
+                        <th class="text-end" style="width:50px;">T2</th>
+                        <th class="text-end" style="width:55px;">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in stock_by_modelo %}
+                    {% set mod = row.modelo %}
+                    {% set safe_mod = mod|replace(' ', '_')|replace("'", "_") %}
+                    <tr class="modelo-parent-row" data-modelo="{{ mod }}" style="cursor:pointer;" onclick="toggleModeloDetail('{{ mod|replace("'", "\\'") }}')">
+                        <td class="text-center"><i class="bi bi-chevron-right"></i></td>
+                        <td class="fw-bold small">{{ mod }}</td>
+                        <td class="text-end small">{{ row.t1 }}</td>
+                        <td class="text-end small">{{ row.t2 }}</td>
+                        <td class="text-end fw-bold small">{{ row.total }}</td>
+                    </tr>
+                    {% if modelo_detail.get(mod) %}
+                    {% for e in modelo_detail[mod] %}
+                    {% set safe_est = e.estilo|replace(' ', '_')|replace("'", "_") %}
+                    {% set me_key = safe_mod ~ '__' ~ safe_est %}
+                    <tr class="mdetail-row mdetail-{{ safe_mod }}" style="display:none; background:#f8f9fa; cursor:pointer;" onclick="toggleModeloColor('{{ me_key }}')">
+                        <td class="text-center"><i class="bi bi-chevron-right mcolor-icon-{{ me_key }}"></i></td>
+                        <td class="ps-4 text-muted"><small>{{ e.estilo }}</small></td>
+                        <td class="text-end"><small>{{ e.t1 }}</small></td>
+                        <td class="text-end"><small>{{ e.t2 }}</small></td>
+                        <td class="text-end"><small class="fw-bold">{{ e.total }}</small></td>
+                    </tr>
+                    <!-- Estilo images row in modelo view -->
+                    <tr class="mdetail-row mdetail-{{ safe_mod }} mestilo-img-row" data-estilo-id="{{ estilo_ids.get(e.estilo, '') }}" style="display:none; background:#fff;">
+                        <td></td>
+                        <td colspan="4" class="img-cell">
+                            <div class="img-strip" id="meimg-{{ estilo_ids.get(e.estilo, '') }}-{{ safe_mod }}">
+                                <div class="img-loading"><div class="spinner-border spinner-border-sm text-secondary"></div></div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% set color_key = e.estilo ~ '|' ~ mod %}
+                    {% if color_detail.get(color_key) %}
+                    {% for c in color_detail[color_key] %}
+                    <tr class="mcolor-row mcolor-{{ me_key }}" style="display:none; background:#eef2ff;">
+                        <td></td>
+                        <td colspan="2" class="ps-5">
+                            <small class="text-secondary"><i class="bi bi-palette"></i> {{ c.color }}</small>
+                            <div class="color-img-strip" data-estilo-id="{{ estilo_ids.get(e.estilo, '') }}" data-color-name="{{ c.color }}"></div>
+                            <div class="barcode-list" data-estilo-id="{{ estilo_ids.get(e.estilo, '') }}" data-color-name="{{ c.color }}" data-modelo-name="{{ mod }}"></div>
+                        </td>
+                        <td class="text-end"><small class="text-secondary">{{ c.t1 }}</small></td>
+                        <td class="text-end"><small class="text-secondary fw-bold">{{ c.total }}</small></td>
+                    </tr>
+                    {% endfor %}
+                    {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+                <tfoot class="table-dark">
+                    <tr>
+                        <td></td>
+                        <th class="small">TOTAL</th>
+                        <th class="text-end small">{% set mt1 = namespace(v=0) %}{% for r in stock_by_modelo %}{% set mt1.v = mt1.v + r.t1 %}{% endfor %}{{ mt1.v }}</th>
+                        <th class="text-end small">{% set mt2 = namespace(v=0) %}{% for r in stock_by_modelo %}{% set mt2.v = mt2.v + r.t2 %}{% endfor %}{{ mt2.v }}</th>
+                        <th class="text-end small">{% set mtt = namespace(v=0) %}{% for r in stock_by_modelo %}{% set mtt.v = mtt.v + r.total %}{% endfor %}{{ mtt.v }}</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" onclick="this.style.display='none'">
+    <img id="lightboxImg">
+    <button class="close-btn">&times;</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+    // ===== IMAGE CACHE =====
+    // { estiloId: { estilo_images: [url,...], color_images: { "NEGRO": [url,...], ... } } }
+    const imageCache = {};
+
+    function thumbUrl(url) {
+        if (url.includes('/storage/v1/object/public/'))
+            return url + (url.includes('?') ? '&' : '?') + 'width=200&quality=60';
+        return url;
+    }
+
+    function fullUrl(url) {
+        return url.replace(/[?&](width|quality)=\d+/g, '');
+    }
+
+    async function loadImages(estiloId) {
+        if (imageCache[estiloId]) return imageCache[estiloId];
+        try {
+            const resp = await fetch('/api/images/' + estiloId);
+            if (!resp.ok) throw new Error();
+            const data = await resp.json();
+            imageCache[estiloId] = data;
+            return data;
+        } catch (e) {
+            return { estilo_images: [], color_images: {} };
+        }
+    }
+
+    function renderEstiloStrip(container, urls) {
+        if (!urls.length) {
+            container.innerHTML = '<small class="text-muted">Sin fotos</small>';
+            return;
+        }
+        container.innerHTML = urls.map(url =>
+            `<img src="${thumbUrl(url)}" loading="lazy" onclick="event.stopPropagation(); openLightbox('${fullUrl(url)}')" onerror="this.style.display='none'">`
+        ).join('');
+    }
+
+    function renderColorStrips(estiloId, colorImages, barcodes) {
+        document.querySelectorAll(`.color-img-strip[data-estilo-id="${estiloId}"]`).forEach(strip => {
+            const colorName = strip.dataset.colorName;
+            const urls = colorImages[colorName] || [];
+            if (!urls.length) return;
+            strip.innerHTML = urls.map(url =>
+                `<img src="${thumbUrl(url)}" loading="lazy" onclick="event.stopPropagation(); openLightbox('${fullUrl(url)}')" onerror="this.style.display='none'">`
+            ).join('');
+        });
+        document.querySelectorAll(`.barcode-list[data-estilo-id="${estiloId}"]`).forEach(el => {
+            const colorName = el.dataset.colorName;
+            const modeloName = el.dataset.modeloName || '';
+            const key = modeloName + '|' + colorName;
+            const codes = barcodes[key] || [];
+            if (!codes.length) return;
+            el.innerHTML = codes.join(' &middot; ');
+        });
+    }
+
+    // ===== VIEW TOGGLE =====
+    document.getElementById('viewToggle').addEventListener('click', function(e) {
+        const btn = e.target.closest('[data-view]');
+        if (!btn) return;
+        this.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('estiloView').style.display = btn.dataset.view === 'estilo' ? '' : 'none';
+        document.getElementById('modeloView').style.display = btn.dataset.view === 'modelo' ? '' : 'none';
+    });
+
+    // ===== ESTILO > MODELO EXPAND =====
+    const openEstilos = new Set();
+    const openModelos = new Set();
+
+    window.toggleDetail = async function(estilo) {
+        const safe = estilo.replace(/ /g,'_').replace(/'/g,'_');
+        const rows = document.querySelectorAll('.detail-' + CSS.escape(safe));
+        const isOpen = openEstilos.has(estilo);
+        rows.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
+        if (isOpen) {
+            openEstilos.delete(estilo);
+            openModelos.forEach(mk => {
+                if (mk.startsWith(safe + '__')) {
+                    document.querySelectorAll('.color-' + CSS.escape(mk)).forEach(cr => cr.style.display = 'none');
+                    openModelos.delete(mk);
+                }
+            });
+        } else {
+            openEstilos.add(estilo);
+            // Load images for this estilo
+            const row = document.querySelector(`tr.estilo-row[data-estilo="${estilo}"]`);
+            const estiloId = row ? row.dataset.estiloId : null;
+            if (estiloId) {
+                const data = await loadImages(estiloId);
+                const strip = document.getElementById('eimg-' + estiloId);
+                if (strip) renderEstiloStrip(strip, data.estilo_images);
+                renderColorStrips(estiloId, data.color_images, data.barcodes || {});
+            }
+        }
+        const estiloRow = document.querySelector(`tr.estilo-row[data-estilo="${estilo}"]`);
+        if (estiloRow) { const i = estiloRow.querySelector('td:first-child i'); if(i) i.className = 'bi bi-chevron-' + (isOpen ? 'right' : 'down'); }
+    };
+
+    window.toggleColor = function(modKey) {
+        const rows = document.querySelectorAll('.color-' + CSS.escape(modKey));
+        const isOpen = openModelos.has(modKey);
+        rows.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
+        if (isOpen) openModelos.delete(modKey); else openModelos.add(modKey);
+        const icon = document.querySelector('.color-icon-' + CSS.escape(modKey));
+        if (icon) icon.className = 'bi bi-chevron-' + (isOpen ? 'right' : 'down');
+    };
+
+    // ===== MODELO > ESTILO EXPAND =====
+    const openModelos2 = new Set();
+    const openModeloColors = new Set();
+
+    window.toggleModeloDetail = async function(modelo) {
+        const safe = modelo.replace(/ /g,'_').replace(/'/g,'_');
+        const rows = document.querySelectorAll('.mdetail-' + CSS.escape(safe));
+        const isOpen = openModelos2.has(modelo);
+        rows.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
+        if (isOpen) {
+            openModelos2.delete(modelo);
+            openModeloColors.forEach(mk => {
+                if (mk.startsWith(safe + '__')) {
+                    document.querySelectorAll('.mcolor-' + CSS.escape(mk)).forEach(cr => cr.style.display = 'none');
+                    openModeloColors.delete(mk);
+                }
+            });
+        } else {
+            openModelos2.add(modelo);
+            // Load images for all estilos shown under this modelo
+            const imgRows = document.querySelectorAll(`.mdetail-${CSS.escape(safe)}.mestilo-img-row`);
+            for (const imgRow of imgRows) {
+                const estiloId = imgRow.dataset.estiloId;
+                if (estiloId) {
+                    const data = await loadImages(estiloId);
+                    const strip = imgRow.querySelector('.img-strip');
+                    if (strip) renderEstiloStrip(strip, data.estilo_images);
+                    renderColorStrips(estiloId, data.color_images, data.barcodes || {});
+                }
+            }
+        }
+        const modeloRow = document.querySelector(`tr.modelo-parent-row[data-modelo="${modelo}"]`);
+        if (modeloRow) { const i = modeloRow.querySelector('td:first-child i'); if(i) i.className = 'bi bi-chevron-' + (isOpen ? 'right' : 'down'); }
+    };
+
+    window.toggleModeloColor = function(meKey) {
+        const rows = document.querySelectorAll('.mcolor-' + CSS.escape(meKey));
+        const isOpen = openModeloColors.has(meKey);
+        rows.forEach(r => r.style.display = isOpen ? 'none' : 'table-row');
+        if (isOpen) openModeloColors.delete(meKey); else openModeloColors.add(meKey);
+        const icon = document.querySelector('.mcolor-icon-' + CSS.escape(meKey));
+        if (icon) icon.className = 'bi bi-chevron-' + (isOpen ? 'right' : 'down');
+    };
+
+    // ===== SEARCH =====
+    document.getElementById('estiloSearch').addEventListener('input', function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll('#estiloTable .estilo-row').forEach(row => {
+            const match = !q || row.dataset.estilo.toLowerCase().includes(q);
+            row.style.display = match ? '' : 'none';
+            const safe = row.dataset.estilo.replace(/ /g,'_').replace(/'/g,'_');
+            document.querySelectorAll('.detail-' + CSS.escape(safe)).forEach(dr => {
+                dr.style.display = match && openEstilos.has(row.dataset.estilo) ? 'table-row' : 'none';
+            });
+        });
+    });
+
+    document.getElementById('modeloSearch').addEventListener('input', function() {
+        const q = this.value.toLowerCase();
+        document.querySelectorAll('#modeloTable .modelo-parent-row').forEach(row => {
+            const match = !q || row.dataset.modelo.toLowerCase().includes(q);
+            row.style.display = match ? '' : 'none';
+            const safe = row.dataset.modelo.replace(/ /g,'_').replace(/'/g,'_');
+            document.querySelectorAll('.mdetail-' + CSS.escape(safe)).forEach(dr => {
+                dr.style.display = match && openModelos2.has(row.dataset.modelo) ? 'table-row' : 'none';
+            });
+        });
+    });
+
+    // ===== LIGHTBOX =====
+    window.openLightbox = function(url) {
+        document.getElementById('lightboxImg').src = url;
+        document.getElementById('lightbox').style.display = 'flex';
+    };
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') document.getElementById('lightbox').style.display = 'none';
+    });
+});
+</script>
+</body>
+</html>
