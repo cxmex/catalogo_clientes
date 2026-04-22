@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 import httpx
@@ -27,7 +27,7 @@ async def catalogo(request: Request):
     """Customer-facing catalog: stock by estilo/modelo with images."""
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp_stock_estilo, resp_stock_detail, resp_stock_color, resp_estilos = await asyncio.gather(
+            resp_stock_estilo, resp_stock_detail, resp_stock_color, resp_estilos, resp_modelos = await asyncio.gather(
                 client.get(f"{SUPABASE_URL}/rest/v1/rpc/get_current_stock_by_estilo", headers=HEADERS),
                 client.get(f"{SUPABASE_URL}/rest/v1/rpc/get_current_stock_by_estilo_modelo", headers=HEADERS),
                 client.get(f"{SUPABASE_URL}/rest/v1/rpc/get_current_stock_by_estilo_modelo_color", headers=HEADERS),
@@ -35,6 +35,11 @@ async def catalogo(request: Request):
                     f"{SUPABASE_URL}/rest/v1/inventario_estilos",
                     headers={**HEADERS, "Range": "0-999"},
                     params={"select": "id,nombre", "limit": "1000"}
+                ),
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/inventario_modelos",
+                    headers={**HEADERS, "Range": "0-9999"},
+                    params={"select": "id,modelo,marca", "order": "modelo.asc"}
                 ),
             )
 
@@ -91,6 +96,8 @@ async def catalogo(request: Request):
                 modelo_detail[mod].append({"estilo": est, "t1": t1, "t2": t2, "total": total})
         stock_by_modelo_list = sorted(stock_by_modelo.values(), key=lambda x: x["total"], reverse=True)
 
+        modelos = resp_modelos.json() if resp_modelos.status_code < 400 else []
+
         return templates.TemplateResponse(
             request=request,
             name="catalogo.html",
@@ -101,6 +108,7 @@ async def catalogo(request: Request):
                 "stock_by_modelo": stock_by_modelo_list,
                 "modelo_detail": modelo_detail,
                 "estilo_ids": estilo_ids,
+                "modelos": modelos,
             }
         )
 
@@ -245,3 +253,120 @@ async def get_estilo_images(estilo_id: int):
         print(f"Error fetching images for estilo {estilo_id}: {e}", flush=True)
 
     return JSONResponse(result)
+
+
+@app.get("/api/browse-modelo")
+async def api_browse_modelo(modelo: str, days: int = 30):
+    """Return estilo+color products for a given modelo with images and metrics."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp_analysis, resp_images, resp_estilos = await asyncio.gather(
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/rpc/get_order_analysis",
+                    headers={**HEADERS, "Range": "0-9999"},
+                    params={"days_back": days}
+                ),
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/image_uploads",
+                    headers={**HEADERS, "Range": "0-9999"},
+                    params={"select": "estilo_id,color_id,public_url"}
+                ),
+                client.get(
+                    f"{SUPABASE_URL}/rest/v1/inventario_estilos",
+                    headers={**HEADERS, "Range": "0-9999"},
+                    params={"select": "id,nombre"}
+                ),
+            )
+
+        if resp_analysis.status_code >= 400:
+            raise HTTPException(status_code=500, detail=f"RPC error: {resp_analysis.text}")
+
+        all_rows = resp_analysis.json()
+
+        # Build estilo name -> id map
+        estilo_id_map = {}
+        for e in (resp_estilos.json() if resp_estilos.status_code < 400 else []):
+            estilo_id_map[e["nombre"]] = e["id"]
+
+        # Build image lookup: images_by_estilo[estilo_id][color_id] = url
+        images_by_estilo = {}
+        if resp_images.status_code < 400:
+            for img in resp_images.json():
+                eid = img.get("estilo_id")
+                cid = img.get("color_id")
+                url = img.get("public_url", "")
+                if eid and url:
+                    if eid not in images_by_estilo:
+                        images_by_estilo[eid] = {}
+                    if cid not in images_by_estilo[eid]:
+                        images_by_estilo[eid][cid] = url
+
+        # Resolve color names to color_ids for image matching
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp_colors = await client.get(
+                f"{SUPABASE_URL}/rest/v1/inventario_colores",
+                headers={**HEADERS, "Range": "0-9999"},
+                params={"select": "id,color", "order": "color.asc"}
+            )
+        color_name_to_id = {}
+        if resp_colors.status_code < 400:
+            for c in resp_colors.json():
+                color_name_to_id[c["color"].strip().upper()] = c["id"]
+
+        # Filter rows for the requested modelo
+        filtered = [
+            r for r in all_rows
+            if (r.get("modelo") or "").strip().upper() == modelo.strip().upper()
+            and (float(r.get("stock_total", 0) or 0) > 0
+                 or float(r.get("sold_total", 0) or 0) > 0)
+        ]
+
+        # Build product list
+        products = []
+        for r in filtered:
+            est = r.get("estilo", "") or "Sin estilo"
+            color = r.get("color", "") or "Sin color"
+            stock = int(float(r.get("stock_total", 0) or 0))
+            sold = int(float(r.get("sold_total", 0) or 0))
+            rev = float(r.get("revenue_total", 0) or 0)
+            avg_daily = float(r.get("avg_daily_sales", 0) or 0)
+            doi = r.get("days_of_inventory")
+            doi = round(float(doi), 1) if doi is not None else None
+
+            # Resolve image
+            eid = estilo_id_map.get(est)
+            cid = color_name_to_id.get(color.strip().upper())
+            image_url = ""
+            has_image = False
+            if eid and cid and eid in images_by_estilo:
+                image_url = images_by_estilo[eid].get(cid, "")
+            if not image_url and eid and eid in images_by_estilo:
+                imgs = images_by_estilo[eid]
+                if imgs:
+                    image_url = next(iter(imgs.values()), "")
+            if image_url:
+                has_image = True
+
+            products.append({
+                "estilo": est,
+                "color": color,
+                "stock": stock,
+                "sold": sold,
+                "revenue": round(rev),
+                "avg_daily": round(avg_daily, 1),
+                "doi": doi,
+                "image_url": image_url,
+                "has_image": has_image,
+            })
+
+        # Sort: items with images first, then by sold desc
+        products.sort(key=lambda p: (-int(p["has_image"]), -p["sold"]))
+
+        return JSONResponse({"products": products, "modelo": modelo, "count": len(products)})
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
