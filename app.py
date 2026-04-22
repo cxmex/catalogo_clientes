@@ -110,6 +110,32 @@ async def catalogo(request: Request):
         return HTMLResponse(f"<h3>Error cargando catalogo</h3><p>{e}</p>", status_code=500)
 
 
+@app.get("/catalogo/{estilo_id}", response_class=HTMLResponse)
+async def catalogo_detalle(request: Request, estilo_id: int):
+    """Product detail page – placeholder for future implementation."""
+    # Fetch estilo name
+    estilo_name = ""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/inventario_estilos",
+                headers=HEADERS,
+                params={"select": "id,nombre", "id": f"eq.{estilo_id}", "limit": "1"}
+            )
+            if resp.status_code < 400:
+                rows = resp.json()
+                if rows:
+                    estilo_name = rows[0].get("nombre", "")
+    except Exception:
+        pass
+
+    return templates.TemplateResponse(
+        request=request,
+        name="catalogo_detalle.html",
+        context={"estilo_id": estilo_id, "estilo_name": estilo_name}
+    )
+
+
 @app.get("/api/images/{estilo_id}")
 async def get_estilo_images(estilo_id: int):
     """Return estilo-level images, color-level images, and barcodes grouped by modelo|color."""

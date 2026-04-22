@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ estilo_name or "Producto" }} - Fundastock</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        body { background:#f5f5f5; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    </style>
+</head>
+<body>
+<div class="container py-4" style="max-width:800px;">
+    <a href="/" class="btn btn-sm btn-outline-dark mb-3"><i class="bi bi-arrow-left"></i> Volver al catálogo</a>
+
+    <div class="bg-white rounded-3 p-4 shadow-sm">
+        <h4 class="fw-bold mb-1">{{ estilo_name }}</h4>
+        <p class="text-muted small">Estilo ID: {{ estilo_id }}</p>
+        <hr>
+        <p class="text-muted">Esta página está en construcción. Aquí se mostrará el detalle del producto.</p>
+        <p class="text-muted small">URL: <code>/catalogo/{{ estilo_id }}</code></p>
+    </div>
+</div>
+</body>
+</html>

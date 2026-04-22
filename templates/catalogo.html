@@ -31,6 +31,32 @@
                                color:#fff; font-size:2.2rem; cursor:pointer; }
         .view-btn.active { background:#212529!important; color:#fff!important; }
         .img-cell { max-width:280px; }
+
+        /* Catálogo grid */
+        .cat-card {
+            background:#fff; border:1px solid #e9ecef; border-radius:12px;
+            overflow:hidden; transition:box-shadow .15s, transform .15s;
+            cursor:pointer; text-decoration:none; color:inherit; display:block;
+        }
+        .cat-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.1); transform:translateY(-2px); color:inherit; }
+        .cat-card-img {
+            width:100%; aspect-ratio:1; background:#f5f5f5;
+            display:flex; align-items:center; justify-content:center; overflow:hidden;
+        }
+        .cat-card-img img { width:100%; height:100%; object-fit:cover; }
+        .cat-card-img .no-img { color:#ccc; font-size:2.5rem; }
+        .cat-card-body { padding:10px 12px; }
+        .cat-card-body h6 { font-size:.85rem; margin:0 0 4px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .cat-card-body .cat-meta { font-size:.7rem; color:#888; }
+        .cat-card-body .cat-stock {
+            display:inline-block; font-size:.7rem; font-weight:600; padding:2px 8px;
+            border-radius:20px; margin-top:4px;
+        }
+        .cat-stock-high { background:#d4edda; color:#155724; }
+        .cat-stock-mid { background:#fff3cd; color:#856404; }
+        .cat-stock-low { background:#f8d7da; color:#721c24; }
+        .cat-chip { border-radius:20px; font-size:.75rem; }
+        .cat-chip.active { background:#212529!important; color:#fff!important; border-color:#212529!important; }
     </style>
 </head>
 <body>
@@ -42,6 +68,7 @@
         <div class="btn-group btn-group-sm" id="viewToggle">
             <button class="btn btn-outline-dark view-btn active" data-view="estilo">Por Estilo</button>
             <button class="btn btn-outline-dark view-btn" data-view="modelo">Por Modelo</button>
+            <button class="btn btn-outline-dark view-btn" data-view="catalogo">Catálogo</button>
         </div>
     </div>
 
@@ -217,6 +244,24 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- ============ VIEW 3: CATÁLOGO VISUAL ============ -->
+    <div id="catalogoView" style="display:none;">
+        <div class="input-group input-group-sm mb-3 mx-auto" style="max-width:400px;">
+            <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="catalogoSearch" placeholder="Buscar estilo...">
+        </div>
+
+        <!-- Brand filter chips -->
+        <div id="catalogoChips" class="d-flex flex-wrap gap-2 justify-content-center mb-3">
+            <button class="btn btn-sm btn-dark cat-chip active" data-filter="all">Todos</button>
+        </div>
+
+        <div id="catalogoCount" class="text-muted small text-center mb-2"></div>
+
+        <!-- Product grid -->
+        <div id="catalogoGrid" class="row row-cols-2 row-cols-md-3 g-3"></div>
+    </div>
 </div>
 
 <!-- Lightbox -->
@@ -291,8 +336,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!btn) return;
         this.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        document.getElementById('estiloView').style.display = btn.dataset.view === 'estilo' ? '' : 'none';
-        document.getElementById('modeloView').style.display = btn.dataset.view === 'modelo' ? '' : 'none';
+        const v = btn.dataset.view;
+        document.getElementById('estiloView').style.display = v === 'estilo' ? '' : 'none';
+        document.getElementById('modeloView').style.display = v === 'modelo' ? '' : 'none';
+        document.getElementById('catalogoView').style.display = v === 'catalogo' ? '' : 'none';
+        if (v === 'catalogo' && !catalogoLoaded) initCatalogo();
     });
 
     // ===== ESTILO > MODELO EXPAND =====
@@ -405,6 +453,139 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+
+    // ===== CATÁLOGO VISUAL =====
+    let catalogoLoaded = false;
+    const catalogoData = [
+        {% for row in stock_by_estilo %}
+        {
+            estilo: "{{ row.estilo|replace('"', '\\"') }}",
+            estiloId: {{ estilo_ids.get(row.estilo, 0) or 0 }},
+            total: {{ row.total_stock if row.total_stock is defined else row.get("total_stock", 0) }},
+            t1: {{ row.terex1_stock if row.terex1_stock is defined else row.get("terex1_stock", 0) }},
+            t2: {{ row.terex2_stock if row.terex2_stock is defined else row.get("terex2_stock", 0) }},
+            modelos: {{ (stock_detail.get(row.estilo, [])|length) }},
+        },
+        {% endfor %}
+    ];
+
+    let catFilter = 'all';
+    let catSearch = '';
+
+    function initCatalogo() {
+        catalogoLoaded = true;
+
+        // Build brand chips from estilo prefixes (first word)
+        const brands = {};
+        catalogoData.forEach(d => {
+            // Use first word as rough brand grouping
+            const first = d.estilo.split(' ')[0].split('-')[0].toUpperCase();
+            if (first.length >= 2) brands[first] = (brands[first] || 0) + 1;
+        });
+        const topBrands = Object.entries(brands)
+            .sort((a,b) => b[1] - a[1])
+            .slice(0, 12)
+            .map(e => e[0]);
+
+        const chipContainer = document.getElementById('catalogoChips');
+        topBrands.forEach(brand => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-outline-dark cat-chip';
+            btn.dataset.filter = brand;
+            btn.textContent = brand;
+            chipContainer.appendChild(btn);
+        });
+
+        chipContainer.addEventListener('click', function(e) {
+            const btn = e.target.closest('.cat-chip');
+            if (!btn) return;
+            chipContainer.querySelectorAll('.cat-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            catFilter = btn.dataset.filter;
+            renderCatalogo();
+        });
+
+        document.getElementById('catalogoSearch').addEventListener('input', function() {
+            catSearch = this.value.toLowerCase();
+            renderCatalogo();
+        });
+
+        renderCatalogo();
+        lazyLoadCatImages();
+    }
+
+    function renderCatalogo() {
+        const grid = document.getElementById('catalogoGrid');
+        let items = catalogoData.filter(d => d.total > 0);
+
+        if (catFilter !== 'all') {
+            items = items.filter(d => d.estilo.toUpperCase().startsWith(catFilter));
+        }
+        if (catSearch) {
+            items = items.filter(d => d.estilo.toLowerCase().includes(catSearch));
+        }
+
+        items.sort((a, b) => b.total - a.total);
+
+        document.getElementById('catalogoCount').textContent = `${items.length} estilo${items.length !== 1 ? 's' : ''}`;
+
+        if (!items.length) {
+            grid.innerHTML = '<div class="col-12 text-center py-4 text-muted">No se encontraron estilos</div>';
+            return;
+        }
+
+        grid.innerHTML = items.map(d => {
+            const stockClass = d.total >= 20 ? 'cat-stock-high' : d.total >= 5 ? 'cat-stock-mid' : 'cat-stock-low';
+            return `
+            <div class="col">
+                <a href="/catalogo/${d.estiloId}" class="cat-card" data-estilo-id="${d.estiloId}">
+                    <div class="cat-card-img" id="catimg-${d.estiloId}">
+                        <i class="bi bi-image no-img"></i>
+                    </div>
+                    <div class="cat-card-body">
+                        <h6 title="${d.estilo}">${d.estilo}</h6>
+                        <div class="cat-meta">${d.modelos} modelo${d.modelos !== 1 ? 's' : ''}</div>
+                        <span class="cat-stock ${stockClass}">${d.total} pzas</span>
+                    </div>
+                </a>
+            </div>`;
+        }).join('');
+
+        lazyLoadCatImages();
+    }
+
+    // Lazy-load first image for each visible card
+    const catImgLoaded = new Set();
+    function lazyLoadCatImages() {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (!entry.isIntersecting) return;
+                const wrap = entry.target;
+                const id = wrap.id.replace('catimg-', '');
+                if (catImgLoaded.has(id) || !id || id === '0') return;
+                catImgLoaded.add(id);
+                observer.unobserve(wrap);
+
+                loadImages(parseInt(id)).then(data => {
+                    const allUrls = [...(data.estilo_images || [])];
+                    // Also grab first color image if no estilo images
+                    if (!allUrls.length && data.color_images) {
+                        for (const urls of Object.values(data.color_images)) {
+                            if (urls.length) { allUrls.push(urls[0]); break; }
+                        }
+                    }
+                    if (allUrls.length) {
+                        wrap.innerHTML = `<img src="${thumbUrl(allUrls[0])}" loading="lazy" onerror="this.parentElement.innerHTML='<i class=\\'bi bi-image no-img\\'></i>'">`;
+                    }
+                });
+            });
+        }, { rootMargin: '200px' });
+
+        document.querySelectorAll('.cat-card-img').forEach(el => {
+            const id = el.id.replace('catimg-', '');
+            if (!catImgLoaded.has(id)) observer.observe(el);
+        });
+    }
 
     // ===== LIGHTBOX =====
     window.openLightbox = function(url) {
